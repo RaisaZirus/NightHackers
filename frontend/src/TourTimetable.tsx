@@ -11,8 +11,9 @@ interface PaymentEntry { id: number; amount: number; note: string | null; time: 
 interface PersonColor  { bg: string; border: string; text: string; dot: string; }
 
 type PersonName = "Raisa" | "Salwa" | "Farhana" | "Nishat" | "Maa";
-type PaymentMap = Record<PersonName, PaymentEntry[]>;
-type StringMap  = Record<PersonName, string>;
+type TrackerName = PersonName | "CommonBucket";
+type PaymentMap = Record<TrackerName, PaymentEntry[]>;
+type StringMap  = Record<TrackerName, string>;
 
 // ── Light / Dark tokens ───────────────────────────────────────────────────────
 
@@ -91,8 +92,10 @@ const DEFAULT_SCHEDULE: ScheduleSection[] = [
   ]},
 ];
 
+const ALL_TRACKERS: TrackerName[] = ["Raisa", "Salwa", "Farhana", "Nishat", "Maa", "CommonBucket"];
+
 const DEFAULT_PAYMENTS: PaymentMap =
-  Object.fromEntries(["Raisa","Salwa","Farhana","Nishat","Maa"].map((p) => [p, []])) as PaymentMap;
+  Object.fromEntries(ALL_TRACKERS.map((p) => [p, []])) as PaymentMap;
 
 const PEOPLE: PersonName[] = ["Raisa", "Salwa", "Farhana", "Nishat", "Maa"];
 
@@ -119,9 +122,9 @@ export default function TourTimetable(): JSX.Element {
   const [editingId, setEditingId]           = useState<number | null>(null);
   const [editPrice, setEditPrice]           = useState<string>("");
   const [payments, setPayments]             = useState<PaymentMap>(DEFAULT_PAYMENTS);
-  const [payInput, setPayInput]             = useState<StringMap>(Object.fromEntries(PEOPLE.map(p => [p, ""])) as StringMap);
-  const [payNote, setPayNote]               = useState<StringMap>(Object.fromEntries(PEOPLE.map(p => [p, ""])) as StringMap);
-  const [expandedLog, setExpandedLog]       = useState<PersonName | null>(null);
+  const [payInput, setPayInput]             = useState<StringMap>(Object.fromEntries(ALL_TRACKERS.map(p => [p, ""])) as StringMap);
+  const [payNote, setPayNote]               = useState<StringMap>(Object.fromEntries(ALL_TRACKERS.map(p => [p, ""])) as StringMap);
+  const [expandedLog, setExpandedLog]       = useState<TrackerName | null>(null);
   const [ready, setReady]                   = useState<boolean>(false);
   const [syncing, setSyncing]               = useState<boolean>(false);
   const [addItemOpen, setAddItemOpen]       = useState<string | null>(null);
@@ -148,7 +151,12 @@ export default function TourTimetable(): JSX.Element {
       if (snap.exists()) {
         const data = snap.data();
         if (data.costs)        setCosts(data.costs);
-        if (data.payments)     setPayments(data.payments);
+        if (data.payments) {
+          // backfill CommonBucket if this doc was saved before it existed
+          const p = data.payments;
+          if (!p["CommonBucket"]) p["CommonBucket"] = [];
+          setPayments(p);
+        }
         if (data.scheduleData) setScheduleData(data.scheduleData);
       }
       setReady(true);
@@ -188,7 +196,7 @@ export default function TourTimetable(): JSX.Element {
     setScheduleData(prev => prev.map(s => s.section === sectionName ? { ...s, items: [...s.items, newItem] } : s));
     setNewItemTime(""); setNewItemTitle(""); setNewItemNote(""); setAddItemOpen(null);
   };
-  const recordPayment = (person: PersonName) => {
+  const recordPayment = (person: TrackerName) => {
     const amount = parseInt(payInput[person]);
     if (isNaN(amount) || amount <= 0) return;
     const entry: PaymentEntry = { id: Date.now(), amount, note: payNote[person].trim() || null, time: new Date().toLocaleTimeString("en-BD", { hour: "2-digit", minute: "2-digit" }) };
@@ -196,9 +204,9 @@ export default function TourTimetable(): JSX.Element {
     setPayInput(prev => ({ ...prev, [person]: "" }));
     setPayNote(prev => ({ ...prev, [person]: "" }));
   };
-  const removePayment = (person: PersonName, id: number) =>
+  const removePayment = (person: TrackerName, id: number) =>
     setPayments(prev => ({ ...prev, [person]: prev[person].filter(e => e.id !== id) }));
-  const paidTotal = (person: PersonName) => payments[person].reduce((s, e) => s + e.amount, 0);
+  const paidTotal = (person: TrackerName) => payments[person].reduce((s, e) => s + e.amount, 0);
   const balance   = (person: PersonName) => paidTotal(person) - totalPerPerson;
 
   // ── Loading ────────────────────────────────────────────────────────────────
@@ -422,6 +430,63 @@ export default function TourTimetable(): JSX.Element {
               </div>
             );
           })}
+        </div>
+
+        {/* ── Common Bucket ── */}
+        <div style={{ marginTop: "16px", borderTop: `1px dashed ${T.accent}44`, paddingTop: "16px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "10px" }}>
+            <span style={{ fontSize: "16px" }}>🪣</span>
+            <span style={{ fontSize: "11px", letterSpacing: "0.08em", textTransform: "uppercase", color: T.textSecondary, fontWeight: 600 }}>Common Bucket</span>
+            <span style={{ fontSize: "11px", color: T.textMuted }}>— shared group fund</span>
+            <div style={{ flex: 1, height: "1px", background: `${T.accent}22` }} />
+            <span style={{ fontSize: "13px", fontWeight: 700, color: T.accent }}>৳{payments["CommonBucket"].reduce((s, e) => s + e.amount, 0).toLocaleString()}</span>
+          </div>
+          <div style={{ background: T.surface, border: `2px dashed ${T.accent}44`, borderRadius: "14px", overflow: "hidden", backdropFilter: "blur(6px)" }}>
+            <div style={{ padding: "12px 14px 10px", borderBottom: `1px solid ${T.accent}22` }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <div style={{ width: "32px", height: "32px", borderRadius: "50%", background: T.accentSoft, border: `2px solid ${T.accent}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "15px" }}>🪣</div>
+                  <div>
+                    <div style={{ fontSize: "14px", fontWeight: 600, color: T.textPrimary }}>Common Bucket</div>
+                    <div style={{ fontSize: "10px", color: T.textMuted }}>pooled contributions</div>
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: "18px", fontWeight: 700, color: T.accent }}>৳{payments["CommonBucket"].reduce((s, e) => s + e.amount, 0).toLocaleString()}</div>
+                  <div style={{ fontSize: "10px", color: T.textMuted }}>{payments["CommonBucket"].length} contribution{payments["CommonBucket"].length !== 1 ? "s" : ""}</div>
+                </div>
+              </div>
+            </div>
+            <div style={{ padding: "10px 14px" }}>
+              <div style={{ display: "flex", gap: "6px", marginBottom: "5px" }}>
+                <input type="number" min="0" placeholder="৳ amount" value={payInput["CommonBucket"]} onChange={e => setPayInput(prev => ({ ...prev, CommonBucket: e.target.value }))} onKeyDown={e => e.key === "Enter" && recordPayment("CommonBucket")} style={{ flex: 1, background: T.accentSoft, border: `1px solid ${T.accent}55`, borderRadius: "8px", padding: "6px 8px", fontSize: "13px", outline: "none", minWidth: 0, color: T.textPrimary }} />
+                <button onClick={() => recordPayment("CommonBucket")} style={{ background: T.accent, border: "none", borderRadius: "8px", padding: "6px 12px", fontSize: "13px", color: "#fff", cursor: "pointer", fontWeight: 600, flexShrink: 0 }}>+</button>
+              </div>
+              <input type="text" placeholder="Who contributed / what for" value={payNote["CommonBucket"]} onChange={e => setPayNote(prev => ({ ...prev, CommonBucket: e.target.value }))} onKeyDown={e => e.key === "Enter" && recordPayment("CommonBucket")} style={{ width: "100%", background: T.inputBg, border: `1px solid ${T.border}`, borderRadius: "8px", padding: "5px 8px", fontSize: "12px", outline: "none", boxSizing: "border-box", color: T.textPrimary }} />
+            </div>
+            {payments["CommonBucket"].length > 0 && (
+              <div style={{ borderTop: `1px solid ${T.accent}22` }}>
+                <button onClick={() => setExpandedLog(expandedLog === "CommonBucket" ? null : "CommonBucket")} style={{ width: "100%", background: "none", border: "none", padding: "7px 14px", fontSize: "11px", color: T.accent, cursor: "pointer", textAlign: "left", display: "flex", justifyContent: "space-between" }}>
+                  <span>{payments["CommonBucket"].length} contribution{payments["CommonBucket"].length > 1 ? "s" : ""} logged</span>
+                  <span style={{ transition: "transform 0.2s", display: "inline-block", transform: expandedLog === "CommonBucket" ? "rotate(180deg)" : "none" }}>▼</span>
+                </button>
+                {expandedLog === "CommonBucket" && (
+                  <div style={{ padding: "0 14px 10px", display: "flex", flexDirection: "column", gap: "5px", animation: "fadeSlideIn 0.2s ease" }}>
+                    {payments["CommonBucket"].map(entry => (
+                      <div key={entry.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", background: T.accentSoft, borderRadius: "7px", padding: "5px 8px", fontSize: "12px" }}>
+                        <div>
+                          <span style={{ fontWeight: 600, color: T.accent }}>৳{entry.amount.toLocaleString()}</span>
+                          {entry.note && <span style={{ color: T.textSecondary, marginLeft: "5px" }}>· {entry.note}</span>}
+                          <span style={{ color: T.textMuted, fontSize: "10px", marginLeft: "5px" }}>{entry.time}</span>
+                        </div>
+                        <button onClick={() => removePayment("CommonBucket", entry.id)} style={{ background: "none", border: "none", color: T.textMuted, cursor: "pointer", fontSize: "13px", padding: "0 0 0 6px" }}>✕</button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         <div style={{ marginTop: "14px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between" }}>
           <span style={{ fontSize: "12px", color: T.textSecondary }}>Group total paid: <strong style={{ fontSize: "15px", color: T.textPrimary }}>৳{PEOPLE.reduce((s, p) => s + paidTotal(p), 0).toLocaleString()}</strong></span>
