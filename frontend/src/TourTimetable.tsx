@@ -489,9 +489,9 @@ export default function TourTimetable(): JSX.Element {
           </div>
         </div>
         <div style={{ marginTop: "14px", background: T.surface, border: `1px solid ${T.border}`, borderRadius: "12px", padding: "12px 16px", display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between" }}>
-          <span style={{ fontSize: "12px", color: T.textSecondary }}>Group total paid: <strong style={{ fontSize: "15px", color: T.textPrimary }}>৳{PEOPLE.reduce((s, p) => s + paidTotal(p), 0).toLocaleString()}</strong></span>
+          <span style={{ fontSize: "12px", color: T.textSecondary }}>Group total paid: <strong style={{ fontSize: "15px", color: T.textPrimary }}>৳{([...PEOPLE, "CommonBucket" as TrackerName]).reduce((s, p) => s + paidTotal(p as TrackerName), 0).toLocaleString()}</strong></span>
           <span style={{ fontSize: "12px", color: T.textSecondary }}>Group total due: <strong style={{ fontSize: "15px", color: T.accent }}>৳{(totalPerPerson * FRIENDS).toLocaleString()}</strong></span>
-          <span style={{ fontSize: "12px", color: T.textSecondary }}>Remaining: <strong style={{ fontSize: "15px", color: dark ? "#f472b6" : "#e11d48" }}>৳{Math.max(0, totalPerPerson * FRIENDS - PEOPLE.reduce((s, p) => s + paidTotal(p), 0)).toLocaleString()}</strong></span>
+          <span style={{ fontSize: "12px", color: T.textSecondary }}>Remaining: <strong style={{ fontSize: "15px", color: dark ? "#f472b6" : "#e11d48" }}>৳{Math.max(0, totalPerPerson * FRIENDS - ([...PEOPLE, "CommonBucket" as TrackerName]).reduce((s, p) => s + paidTotal(p as TrackerName), 0)).toLocaleString()}</strong></span>
         </div>
       </div>
 
