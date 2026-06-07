@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { db } from "./firebase";
+import { doc, onSnapshot, setDoc } from "firebase/firestore";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,7 +42,7 @@ interface PersonColor {
 
 type PersonName = "Raisa" | "Salwa" | "Farhana" | "Nishat" | "Maa";
 type PaymentMap = Record<PersonName, PaymentEntry[]>;
-type StringMap   = Record<PersonName, string>;
+type StringMap  = Record<PersonName, string>;
 
 // ── Static data ───────────────────────────────────────────────────────────────
 
@@ -57,43 +59,46 @@ const DEFAULT_COSTS: CostItem[] = [
   { id: 10, label: "Bus to Muktagacha", perPerson: 100, icon: "🚍" },
 ];
 
+const DEFAULT_PAYMENTS: PaymentMap =
+  Object.fromEntries(["Raisa","Salwa","Farhana","Nishat","Maa"].map((p) => [p, []])) as PaymentMap;
+
 const schedule: ScheduleSection[] = [
   {
     section: "Morning",
     color: "#C8722A",
     items: [
-      { time: "6:00 – 7:30",  title: "Breakfast",        note: "Morning meal before departure",          cost: "৳250 / person", icon: "🍳" },
-      { time: "7:30 – 11:30", title: "ENA Bus Journey",  note: "4 hours on the road to the destination", cost: "৳100 / person", icon: "🚌" },
+      { time: "6:00 – 7:30",  title: "Breakfast",       note: "Morning meal before departure",          cost: "৳250 / person", icon: "🍳" },
+      { time: "7:30 – 11:30", title: "ENA Bus Journey", note: "4 hours on the road to the destination", cost: "৳100 / person", icon: "🚌" },
     ],
   },
   {
     section: "Arrival",
     color: "#2E9E82",
     items: [
-      { time: "12:00 pm",     title: "Arrive at Destination", note: "Welcome to the tour location!",  icon: "📍" },
-      { time: "1:00 pm",      title: "Check In",              note: "Settle into accommodation",       cost: "৳320 / person", icon: "🏠" },
-      { time: "1:00 – 1:30",  title: "Freshen Up",            note: "Eat, shower, rest a bit",         icon: "🚿" },
+      { time: "12:00 pm",    title: "Arrive at Destination", note: "Welcome to the tour location!", icon: "📍" },
+      { time: "1:00 pm",     title: "Check In",              note: "Settle into accommodation",     cost: "৳320 / person", icon: "🏠" },
+      { time: "1:00 – 1:30", title: "Freshen Up",            note: "Eat, shower, rest a bit",       icon: "🚿" },
     ],
   },
   {
     section: "Exploration",
     color: "#5558C8",
     items: [
-      { time: "1:30 – 2:30", title: "Bus to Jomidar Bari",      note: "Head to Mukigacha Zamindar House",   icon: "🚌" },
-      { time: "2:30 – 3:00", title: "Jomidar Bari Visit",       note: "Explore the heritage manor",         icon: "🏯",  sub: true },
-      { time: "3:00 – 3:05", title: "Buy Monda + Gift",         note: "Local monda sweets & friend's gift", icon: "🎁",  sub: true },
-      { time: "3:05 – 4:05", title: "Shashi Lodge Gate",        note: "Explore the area outside",           icon: "🏛️", sub: true },
-      { time: "4:05 – 4:10", title: "Buy Entry Ticket",         note: "৳15 ticket at the counter",          cost: "৳15 / person", icon: "🎟️", sub: true },
-      { time: "4:10 – 5:00", title: "Inside Shashi Lodge",      note: "Explore until closing time",         icon: "🚪",  sub: true },
-      { time: "5:00 pm",     title: "Street Food by the Park",  note: "Snacks & chill near the park",       icon: "🍢",  sub: true },
+      { time: "1:30 – 2:30", title: "Bus to Jomidar Bari",     note: "Head to Mukigacha Zamindar House",   icon: "🚌" },
+      { time: "2:30 – 3:00", title: "Jomidar Bari Visit",      note: "Explore the heritage manor",         icon: "🏯",  sub: true },
+      { time: "3:00 – 3:05", title: "Buy Monda + Gift",        note: "Local monda sweets & friend's gift", icon: "🎁",  sub: true },
+      { time: "3:05 – 4:05", title: "Shashi Lodge Gate",       note: "Explore the area outside",           icon: "🏛️", sub: true },
+      { time: "4:05 – 4:10", title: "Buy Entry Ticket",        note: "৳15 ticket at the counter",          cost: "৳15 / person", icon: "🎟️", sub: true },
+      { time: "4:10 – 5:00", title: "Inside Shashi Lodge",     note: "Explore until closing time",         icon: "🚪",  sub: true },
+      { time: "5:00 pm",     title: "Street Food by the Park", note: "Snacks & chill near the park",       icon: "🍢",  sub: true },
     ],
   },
   {
     section: "Evening",
     color: "#C8407E",
     items: [
-      { time: "6:00 – 7:00", title: "Friend Meetup",      note: "Special meetup hour with the crew", icon: "🤝" },
-      { time: "7:00 – 9:00", title: "Food Court Dinner",  note: "Big group dinner — eat, eat, eat!", icon: "🍽️" },
+      { time: "6:00 – 7:00", title: "Friend Meetup",     note: "Special meetup hour with the crew", icon: "🤝" },
+      { time: "7:00 – 9:00", title: "Food Court Dinner", note: "Big group dinner — eat, eat, eat!", icon: "🍽️" },
     ],
   },
   {
@@ -121,26 +126,13 @@ const FRIENDS = 5;
 
 export default function TourTimetable(): JSX.Element {
   const [activeSection, setActiveSection] = useState<string | null>(null);
-  const [costs, setCosts] = useState<CostItem[]>(() => {
-    try {
-      const saved = localStorage.getItem("tour_costs");
-      return saved ? JSON.parse(saved) : DEFAULT_COSTS;
-    } catch { return DEFAULT_COSTS; }
-  });
+  const [costs, setCosts] = useState<CostItem[]>(DEFAULT_COSTS);
   const [showAdd, setShowAdd] = useState<boolean>(false);
   const [newLabel, setNewLabel] = useState<string>("");
   const [newPrice, setNewPrice] = useState<string>("");
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editPrice, setEditPrice] = useState<string>("");
-
-  const [payments, setPayments] = useState<PaymentMap>(() => {
-    try {
-      const saved = localStorage.getItem("tour_payments");
-      return saved
-        ? JSON.parse(saved)
-        : (Object.fromEntries(PEOPLE.map((p) => [p, []])) as PaymentMap);
-    } catch { return Object.fromEntries(PEOPLE.map((p) => [p, []])) as PaymentMap; }
-  });
+  const [payments, setPayments] = useState<PaymentMap>(DEFAULT_PAYMENTS);
   const [payInput, setPayInput] = useState<StringMap>(
     Object.fromEntries(PEOPLE.map((p) => [p, ""])) as StringMap
   );
@@ -148,14 +140,34 @@ export default function TourTimetable(): JSX.Element {
     Object.fromEntries(PEOPLE.map((p) => [p, ""])) as StringMap
   );
   const [expandedLog, setExpandedLog] = useState<PersonName | null>(null);
+  const [ready, setReady] = useState<boolean>(false);
+  const [syncing, setSyncing] = useState<boolean>(false);
 
-  useEffect(() => {
-    localStorage.setItem("tour_costs", JSON.stringify(costs));
-  }, [costs]);
+  // ── Firestore sync ──────────────────────────────────────────────────────────
 
+  // Listen for remote changes
   useEffect(() => {
-    localStorage.setItem("tour_payments", JSON.stringify(payments));
-  }, [payments]);
+    const ref = doc(db, "tour", "shared");
+    const unsub = onSnapshot(ref, (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data.costs)    setCosts(data.costs);
+        if (data.payments) setPayments(data.payments);
+      }
+      setReady(true);
+    });
+    return unsub;
+  }, []);
+
+  // Write local changes to Firestore
+  useEffect(() => {
+    if (!ready) return;
+    setSyncing(true);
+    const ref = doc(db, "tour", "shared");
+    setDoc(ref, { costs, payments }, { merge: true }).finally(() => {
+      setTimeout(() => setSyncing(false), 800);
+    });
+  }, [costs, payments, ready]);
 
   const totalPerPerson = costs.reduce((s, c) => s + c.perPerson, 0);
 
@@ -202,12 +214,19 @@ export default function TourTimetable(): JSX.Element {
   const removePayment = (person: PersonName, id: number): void =>
     setPayments((prev) => ({ ...prev, [person]: prev[person].filter((e) => e.id !== id) }));
 
-  const paidTotal = (person: PersonName): number =>
-    payments[person].reduce((s, e) => s + e.amount, 0);
-
-  const balance = (person: PersonName): number => paidTotal(person) - totalPerPerson;
+  const paidTotal  = (person: PersonName): number => payments[person].reduce((s, e) => s + e.amount, 0);
+  const balance    = (person: PersonName): number => paidTotal(person) - totalPerPerson;
 
   // ── Render ──────────────────────────────────────────────────────────────────
+
+  if (!ready) {
+    return (
+      <div style={{ minHeight: "100vh", background: "linear-gradient(160deg, #f5ede4 0%, #e8e3f5 50%, #e0f0ea 100%)", display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: "12px", fontFamily: "'DM Sans', sans-serif" }}>
+        <div style={{ fontSize: "32px" }}>🎒</div>
+        <div style={{ fontSize: "14px", color: "#6655a0" }}>Loading the grand tour…</div>
+      </div>
+    );
+  }
 
   return (
     <div style={{
@@ -220,7 +239,7 @@ export default function TourTimetable(): JSX.Element {
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700;900&family=DM+Sans:wght@300;400;500&display=swap');
         .tour-title { font-family: 'Playfair Display', serif; }
-        .tour-body { font-family: 'DM Sans', sans-serif; }
+        .tour-body  { font-family: 'DM Sans', sans-serif; }
         .cost-card:hover { transform: translateY(-4px); transition: transform 0.2s ease; }
         .event-row:hover .event-card { border-color: rgba(120,100,160,0.3) !important; }
         .section-btn:hover { opacity: 1 !important; }
@@ -228,32 +247,19 @@ export default function TourTimetable(): JSX.Element {
         input::placeholder { color: #8878a8 !important; }
       `}</style>
 
+      {/* ── Sync indicator ── */}
+      {syncing && (
+        <div style={{ position: "fixed", top: "12px", right: "16px", background: "rgba(255,255,255,0.85)", border: "1px solid rgba(155,158,226,0.35)", borderRadius: "99px", padding: "4px 12px", fontSize: "11px", color: "#6655a0", fontFamily: "'DM Sans', sans-serif", zIndex: 100 }}>
+          ☁️ Saving…
+        </div>
+      )}
+
       {/* ── Header ── */}
       <div style={{ textAlign: "center", marginBottom: "2.5rem" }}>
-        <div style={{
-          display: "inline-block",
-          background: "rgba(155,158,226,0.15)",
-          border: "1px solid rgba(155,158,226,0.35)",
-          borderRadius: "99px",
-          padding: "4px 16px",
-          fontSize: "12px",
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
-          color: "#5558C8",
-          marginBottom: "1rem",
-          fontFamily: "'DM Sans', sans-serif",
-        }}>
+        <div style={{ display: "inline-block", background: "rgba(155,158,226,0.15)", border: "1px solid rgba(155,158,226,0.35)", borderRadius: "99px", padding: "4px 16px", fontSize: "12px", letterSpacing: "0.12em", textTransform: "uppercase", color: "#5558C8", marginBottom: "1rem", fontFamily: "'DM Sans', sans-serif" }}>
           5 friends · 1 day trip
         </div>
-        <h1 className="tour-title" style={{
-          fontSize: "clamp(2rem, 5vw, 3.5rem)",
-          fontWeight: 900,
-          margin: 0,
-          background: "linear-gradient(90deg, #c084b8, #9B9EE2, #7ECBB5)",
-          WebkitBackgroundClip: "text",
-          WebkitTextFillColor: "transparent",
-          lineHeight: 1.1,
-        }}>
+        <h1 className="tour-title" style={{ fontSize: "clamp(2rem, 5vw, 3.5rem)", fontWeight: 900, margin: 0, background: "linear-gradient(90deg, #c084b8, #9B9EE2, #7ECBB5)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", lineHeight: 1.1 }}>
           The Grand Tour
         </h1>
         <p className="tour-body" style={{ color: "#6655a0", marginTop: "0.5rem", fontSize: "15px" }}>
@@ -262,62 +268,20 @@ export default function TourTimetable(): JSX.Element {
       </div>
 
       {/* ── Cost Breakdown ── */}
-      <div className="tour-body" style={{
-        background: "rgba(255,255,255,0.6)",
-        border: "1px solid rgba(155,158,226,0.2)",
-        borderRadius: "16px",
-        padding: "1.25rem",
-        maxWidth: "680px",
-        margin: "0 auto 2rem",
-      }}>
+      <div className="tour-body" style={{ background: "rgba(255,255,255,0.6)", border: "1px solid rgba(155,158,226,0.2)", borderRadius: "16px", padding: "1.25rem", maxWidth: "680px", margin: "0 auto 2rem" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-          <div style={{ fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", color: "#6655a0" }}>
-            Cost breakdown — per person
-          </div>
-          <button onClick={() => setShowAdd((v) => !v)} style={{
-            background: showAdd ? "rgba(155,158,226,0.15)" : "rgba(155,158,226,0.08)",
-            border: `1px solid ${showAdd ? "#9B9EE2" : "rgba(155,158,226,0.3)"}`,
-            borderRadius: "99px",
-            padding: "4px 12px",
-            fontSize: "12px",
-            color: showAdd ? "#9B9EE2" : "#a99cc0",
-            cursor: "pointer",
-            display: "flex", alignItems: "center", gap: "5px",
-          }}>
+          <div style={{ fontSize: "11px", letterSpacing: "0.1em", textTransform: "uppercase", color: "#6655a0" }}>Cost breakdown — per person</div>
+          <button onClick={() => setShowAdd((v) => !v)} style={{ background: showAdd ? "rgba(155,158,226,0.15)" : "rgba(155,158,226,0.08)", border: `1px solid ${showAdd ? "#9B9EE2" : "rgba(155,158,226,0.3)"}`, borderRadius: "99px", padding: "4px 12px", fontSize: "12px", color: showAdd ? "#9B9EE2" : "#a99cc0", cursor: "pointer", display: "flex", alignItems: "center", gap: "5px" }}>
             {showAdd ? "✕ Cancel" : "+ Add category"}
           </button>
         </div>
 
         {showAdd && (
-          <div style={{
-            background: "rgba(155,158,226,0.08)",
-            border: "1px solid rgba(155,158,226,0.25)",
-            borderRadius: "10px",
-            padding: "12px",
-            marginBottom: "1rem",
-            display: "flex",
-            gap: "8px",
-            flexWrap: "wrap",
-            alignItems: "center",
-          }}>
-            <input
-              placeholder="Category name"
-              value={newLabel}
-              onChange={(e) => setNewLabel(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && addCategory()}
-              style={{ flex: "2 1 130px", background: "rgba(255,255,255,0.8)", border: "1px solid rgba(155,158,226,0.3)", borderRadius: "8px", padding: "7px 10px", fontSize: "13px", outline: "none" }}
-            />
+          <div style={{ background: "rgba(155,158,226,0.08)", border: "1px solid rgba(155,158,226,0.25)", borderRadius: "10px", padding: "12px", marginBottom: "1rem", display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center" }}>
+            <input placeholder="Category name" value={newLabel} onChange={(e) => setNewLabel(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCategory()} style={{ flex: "2 1 130px", background: "rgba(255,255,255,0.8)", border: "1px solid rgba(155,158,226,0.3)", borderRadius: "8px", padding: "7px 10px", fontSize: "13px", outline: "none" }} />
             <div style={{ flex: "1 1 100px", display: "flex", alignItems: "center", gap: "6px" }}>
               <span style={{ fontSize: "13px", color: "#a99cc0" }}>৳</span>
-              <input
-                placeholder="Per person"
-                value={newPrice}
-                onChange={(e) => setNewPrice(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addCategory()}
-                type="number"
-                min="0"
-                style={{ flex: 1, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(155,158,226,0.3)", borderRadius: "8px", padding: "7px 10px", fontSize: "13px", outline: "none" }}
-              />
+              <input placeholder="Per person" value={newPrice} onChange={(e) => setNewPrice(e.target.value)} onKeyDown={(e) => e.key === "Enter" && addCategory()} type="number" min="0" style={{ flex: 1, background: "rgba(255,255,255,0.8)", border: "1px solid rgba(155,158,226,0.3)", borderRadius: "8px", padding: "7px 10px", fontSize: "13px", outline: "none" }} />
             </div>
             <button onClick={addCategory} style={{ background: "rgba(155,158,226,0.2)", border: "1px solid #9B9EE2", borderRadius: "8px", padding: "7px 16px", fontSize: "13px", color: "#6b6ea8", cursor: "pointer", fontWeight: 500 }}>Add</button>
           </div>
@@ -331,14 +295,7 @@ export default function TourTimetable(): JSX.Element {
               <div style={{ fontSize: "11px", color: "#5e5280", marginBottom: "4px", paddingRight: "12px" }}>{c.label}</div>
               {editingId === c.id ? (
                 <div style={{ display: "flex", gap: "4px", alignItems: "center" }}>
-                  <input
-                    type="number"
-                    value={editPrice}
-                    onChange={(e) => setEditPrice(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") saveEdit(c.id); if (e.key === "Escape") setEditingId(null); }}
-                    autoFocus
-                    style={{ width: "60px", background: "rgba(255,255,255,0.9)", border: "1px solid #9B9EE2", borderRadius: "5px", padding: "3px 5px", fontSize: "13px", outline: "none" }}
-                  />
+                  <input type="number" value={editPrice} onChange={(e) => setEditPrice(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") saveEdit(c.id); if (e.key === "Escape") setEditingId(null); }} autoFocus style={{ width: "60px", background: "rgba(255,255,255,0.9)", border: "1px solid #9B9EE2", borderRadius: "5px", padding: "3px 5px", fontSize: "13px", outline: "none" }} />
                   <button onClick={() => saveEdit(c.id)} style={{ background: "none", border: "none", color: "#9B9EE2", cursor: "pointer", fontSize: "14px" }}>✓</button>
                 </div>
               ) : (
@@ -354,9 +311,7 @@ export default function TourTimetable(): JSX.Element {
         <div style={{ borderTop: "1px solid rgba(155,158,226,0.15)", paddingTop: "12px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
             <span style={{ fontSize: "13px", color: "#5e5280" }}>Total per person</span>
-            <span style={{ fontSize: "24px", fontWeight: 700, color: "#5558C8", fontFamily: "'Playfair Display', serif" }}>
-              ৳{totalPerPerson.toLocaleString()}
-            </span>
+            <span style={{ fontSize: "24px", fontWeight: 700, color: "#5558C8", fontFamily: "'Playfair Display', serif" }}>৳{totalPerPerson.toLocaleString()}</span>
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
             <span style={{ fontSize: "12px", color: "#5e5280" }}>Total for {FRIENDS} friends</span>
@@ -365,7 +320,7 @@ export default function TourTimetable(): JSX.Element {
           <div style={{ display: "flex", borderRadius: "6px", overflow: "hidden", height: "8px", gap: "1px" }}>
             {costs.map((c, i) => {
               const hues = ["#8880D8","#3AA880","#D07830","#C04890","#4880C8","#B89020","#3A9850","#B050C0","#30A8C0","#A89800"];
-              const pct = totalPerPerson > 0 ? (c.perPerson / totalPerPerson) * 100 : 0;
+              const pct  = totalPerPerson > 0 ? (c.perPerson / totalPerPerson) * 100 : 0;
               return <div key={c.id} style={{ width: `${pct}%`, background: hues[i % hues.length], transition: "width 0.4s ease" }} title={`${c.label}: ৳${c.perPerson}`} />;
             })}
           </div>
@@ -393,19 +348,17 @@ export default function TourTimetable(): JSX.Element {
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: "12px" }}>
           {PEOPLE.map((person) => {
-            const col = PERSON_COLORS[person];
-            const paid = paidTotal(person);
-            const bal = balance(person);
-            const pct = totalPerPerson > 0 ? Math.min((paid / totalPerPerson) * 100, 100) : 0;
+            const col        = PERSON_COLORS[person];
+            const paid       = paidTotal(person);
+            const bal        = balance(person);
+            const pct        = totalPerPerson > 0 ? Math.min((paid / totalPerPerson) * 100, 100) : 0;
             const isExpanded = expandedLog === person;
             return (
               <div key={person} style={{ background: "rgba(255,255,255,0.72)", border: `1px solid ${col.border}55`, borderRadius: "14px", overflow: "hidden" }}>
                 <div style={{ padding: "12px 14px 10px", borderBottom: `1px solid ${col.border}33` }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
-                      <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: col.bg, border: `2px solid ${col.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: 700, color: col.text }}>
-                        {person[0]}
-                      </div>
+                      <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: col.bg, border: `2px solid ${col.border}`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: 700, color: col.text }}>{person[0]}</div>
                       <span style={{ fontSize: "14px", fontWeight: 600, color: "#1e1830" }}>{person}</span>
                     </div>
                     <span style={{ fontSize: "12px", fontWeight: 600, color: bal >= 0 ? "#2E9E82" : "#C8407E" }}>
@@ -422,25 +375,10 @@ export default function TourTimetable(): JSX.Element {
                 </div>
                 <div style={{ padding: "10px 14px" }}>
                   <div style={{ display: "flex", gap: "6px", marginBottom: "5px" }}>
-                    <input
-                      type="number"
-                      min="0"
-                      placeholder="৳ amount"
-                      value={payInput[person]}
-                      onChange={(e) => setPayInput((prev) => ({ ...prev, [person]: e.target.value }))}
-                      onKeyDown={(e) => e.key === "Enter" && recordPayment(person)}
-                      style={{ flex: 1, background: col.bg, border: `1px solid ${col.border}66`, borderRadius: "8px", padding: "6px 8px", fontSize: "13px", outline: "none", minWidth: 0 }}
-                    />
+                    <input type="number" min="0" placeholder="৳ amount" value={payInput[person]} onChange={(e) => setPayInput((prev) => ({ ...prev, [person]: e.target.value }))} onKeyDown={(e) => e.key === "Enter" && recordPayment(person)} style={{ flex: 1, background: col.bg, border: `1px solid ${col.border}66`, borderRadius: "8px", padding: "6px 8px", fontSize: "13px", outline: "none", minWidth: 0 }} />
                     <button onClick={() => recordPayment(person)} style={{ background: col.dot, border: "none", borderRadius: "8px", padding: "6px 10px", fontSize: "13px", color: "#fff", cursor: "pointer", fontWeight: 600, flexShrink: 0 }}>+</button>
                   </div>
-                  <input
-                    type="text"
-                    placeholder="Note (optional)"
-                    value={payNote[person]}
-                    onChange={(e) => setPayNote((prev) => ({ ...prev, [person]: e.target.value }))}
-                    onKeyDown={(e) => e.key === "Enter" && recordPayment(person)}
-                    style={{ width: "100%", background: "rgba(255,255,255,0.6)", border: "1px solid rgba(155,158,226,0.25)", borderRadius: "8px", padding: "5px 8px", fontSize: "12px", outline: "none", boxSizing: "border-box" }}
-                  />
+                  <input type="text" placeholder="Note (optional)" value={payNote[person]} onChange={(e) => setPayNote((prev) => ({ ...prev, [person]: e.target.value }))} onKeyDown={(e) => e.key === "Enter" && recordPayment(person)} style={{ width: "100%", background: "rgba(255,255,255,0.6)", border: "1px solid rgba(155,158,226,0.25)", borderRadius: "8px", padding: "5px 8px", fontSize: "12px", outline: "none", boxSizing: "border-box" }} />
                 </div>
                 {payments[person].length > 0 && (
                   <div style={{ borderTop: `1px solid ${col.border}22` }}>
